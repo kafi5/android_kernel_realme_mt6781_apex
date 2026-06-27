@@ -28,7 +28,7 @@ jobs:
           sudo apt install -y \
             bc flex zstd ccache curl git zip unzip rsync \
             libelf-dev libarchive-tools libc++-dev libc++abi-dev \
-            bison build-essential libssl-dev libtinfo5
+            bison build-essential libssl-dev libtinfo6
 
       - name: Setup ccache
         run: |
@@ -91,7 +91,7 @@ jobs:
           git clone --depth=1 https://github.com/HELLINFIX/AnyKernel3 AnyKernel
           cp "$IMAGE" AnyKernel/
           
-          # যদি dtbo এবং dtb আলাদা জেনারেট হয়, সেগুলোও কপি করবে
+          # যদি dtbo এবং dtb আলাদা জেনারেট হয়, সেগুলোও কপি করবে
           [ -f "out/arch/arm64/boot/dtbo.img" ] && cp "out/arch/arm64/boot/dtbo.img" AnyKernel/
           [ -f "out/arch/arm64/boot/dtb" ] && cp "out/arch/arm64/boot/dtb" AnyKernel/
 
