@@ -42,7 +42,7 @@ jobs:
           bash <(curl -s https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman) --patch=glibc
           cd ..
 
-      # ===== KernelSU-Next (FIXED, SAFE) =====
+      # ===== KernelSU-Next =====
       - name: Setup KernelSU-Next v1.1.1
         run: |
           curl -LSs \
@@ -58,7 +58,7 @@ jobs:
           # Defconfig জেনারেট করা
           make O=out spaced_defconfig
           
-          # MTK Clang কমপ্লায়েন্স সহ কম্পাইল (LLVM=1 এর জায়গায় প্রোপার ফ্ল্যাগস)
+          # MTK Clang কমপ্লায়েন্স সহ কম্পাইল
           make -j$(nproc) O=out \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -68,8 +68,8 @@ jobs:
             2>&1 | tee build.log
 
       - name: Upload build log
-        if: failure() # শুধু বিল্ড ফেইল করলেই লগ আপলোড হবে, যা স্টোরেজ বাঁচাবে
-        uses: actions/artifacts@v4
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
@@ -102,7 +102,7 @@ jobs:
 
       - name: Upload kernel zip
         if: success()
-        uses: actions/artifacts@v4
+        uses: actions/upload-artifact@v4
         with:
           name: APEX-Kernel-SPACED
           path: AnyKernel/*.zip
