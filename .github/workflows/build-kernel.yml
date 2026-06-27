@@ -106,30 +106,3 @@ jobs:
         with:
           name: APEX-Kernel-SPACED
           path: AnyKernel/*.zip
-
-      - name: Send Telegram build status
-        if: always()
-        uses: appleboy/telegram-action@v0.1.1
-        with:
-          to: ${{ secrets.TG_CHAT_ID }}
-          token: ${{ secrets.TG_BOT_TOKEN }}
-          message: |
-            ⚡ APEX Kernel Build ⚡
-            ----------------------------------
-            Device: Realme Narzo 50 / SPACED (MT6781)
-            Developer: Kafi
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-            Status: ${{ job.status }}
-
-      - name: Send kernel zip to Telegram
-        if: success()
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: |
-          curl -s \
-            -F "chat_id=${TG_CHAT_ID}" \
-            -F "document=@AnyKernel/${ZIP_NAME}" \
-            -F "caption=✅ APEX Kernel for SPACED successfully built by Kafi!" \
-            "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument"
