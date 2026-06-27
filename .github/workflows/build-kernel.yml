@@ -13,8 +13,8 @@ jobs:
     env:
       ARCH: arm64
       SUBARCH: arm64
-      KBUILD_BUILD_USER: DEEZNUTZ
-      KBUILD_BUILD_HOST: APEX
+      KBUILD_BUILD_USER: Kafi
+      KBUILD_BUILD_HOST: APEX-TECH
       USE_CCACHE: 1
       LC_ALL: C
 
@@ -26,8 +26,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
-            bc flex zstd ccache curl git zip unzip \
-            libelf-dev libarchive-tools libc++-dev libc++abi-dev
+            bc flex zstd ccache curl git zip unzip rsync \
+            libelf-dev libarchive-tools libc++-dev libc++abi-dev \
+            bison build-essential libssl-dev libtinfo5
 
       - name: Setup ccache
         run: |
@@ -36,7 +37,7 @@ jobs:
 
       - name: Clone AOSP Clang 17
         run: |
-          git clone https://gitlab.com/HELLINFIX/aosp-clang-17.0.0.git clang
+          git clone --depth=1 https://gitlab.com/HELLINFIX/aosp-clang-17.0.0.git clang
           cd clang
           bash <(curl -s https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman) --patch=glibc
           cd ..
@@ -47,49 +48,63 @@ jobs:
           curl -LSs \
             https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
             -o ksu_setup.sh
-
           chmod +x ksu_setup.sh
           bash ksu_setup.sh v1.1.1
 
       - name: Build kernel
         run: |
           export PATH="${PWD}/clang/bin:${PATH}"
-
+          
+          # Defconfig জেনারেট করা
           make O=out spaced_defconfig
-          make -j$(nproc) \
-            O=out \
+          
+          # MTK Clang কমপ্লায়েন্স সহ কম্পাইল (LLVM=1 এর জায়গায় প্রোপার ফ্ল্যাগস)
+          make -j$(nproc) O=out \
             CC=clang \
-            LLVM=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CONFIG_NO_ERROR_ON_MISMATCH=y \
             2>&1 | tee build.log
 
       - name: Upload build log
-        uses: actions/upload-artifact@v4
+        if: failure() # শুধু বিল্ড ফেইল করলেই লগ আপলোড হবে, যা স্টোরেজ বাঁচাবে
+        uses: actions/artifacts@v4
         with:
           name: build-log
           path: build.log
 
       - name: Package with AnyKernel3
         run: |
-          IMAGE=out/arch/arm64/boot/Image.gz-dtb
-
-          if [ ! -f "$IMAGE" ]; then
-            echo "Kernel build failed"
+          # MT6781 এর জন্য সঠিক ইমেজ ফরম্যাট ডিটেকশন লজিক
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            IMAGE="out/arch/arm64/boot/Image.gz-dtb"
+          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
+            IMAGE="out/arch/arm64/boot/Image.gz"
+          elif [ -f "out/arch/arm64/boot/Image" ]; then
+            IMAGE="out/arch/arm64/boot/Image"
+          else
+            echo "Error: No usable Kernel Image found!"
             exit 1
           fi
 
           git clone --depth=1 https://github.com/HELLINFIX/AnyKernel3 AnyKernel
           cp "$IMAGE" AnyKernel/
+          
+          # যদি dtbo এবং dtb আলাদা জেনারেট হয়, সেগুলোও কপি করবে
+          [ -f "out/arch/arm64/boot/dtbo.img" ] && cp "out/arch/arm64/boot/dtbo.img" AnyKernel/
+          [ -f "out/arch/arm64/boot/dtb" ] && cp "out/arch/arm64/boot/dtb" AnyKernel/
 
           cd AnyKernel
-          ZIP_NAME="Nebula-$(date +'%Y%m%d-%H').zip"
+          ZIP_NAME="APEX-Nebula-spaced-$(date +'%Y%m%d-%H%M').zip"
           zip -r9 "$ZIP_NAME" *
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Upload kernel zip
-        uses: actions/upload-artifact@v4
+        if: success()
+        uses: actions/artifacts@v4
         with:
-          name: APEX-Kernel-NR-
+          name: APEX-Kernel-SPACED
           path: AnyKernel/*.zip
 
       - name: Send Telegram build status
@@ -99,8 +114,10 @@ jobs:
           to: ${{ secrets.TG_CHAT_ID }}
           token: ${{ secrets.TG_BOT_TOKEN }}
           message: |
-            APEX Kernel Build
-            Device: Realme SPACED (RM6781)
+            ⚡ APEX Kernel Build ⚡
+            ----------------------------------
+            Device: Realme Narzo 50 / SPACED (MT6781)
+            Developer: Kafi
             Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
             Status: ${{ job.status }}
@@ -114,4 +131,5 @@ jobs:
           curl -s \
             -F "chat_id=${TG_CHAT_ID}" \
             -F "document=@AnyKernel/${ZIP_NAME}" \
+            -F "caption=✅ APEX Kernel for SPACED successfully built by Kafi!" \
             "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument"
