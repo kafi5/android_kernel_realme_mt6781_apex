@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       ARCH: arm64
@@ -16,93 +16,141 @@ jobs:
       KBUILD_BUILD_USER: Kafi
       KBUILD_BUILD_HOST: APEX-TECH
       USE_CCACHE: 1
+      CCACHE_DIR: ~/.ccache
       LC_ALL: C
 
     steps:
-      - name: Checkout source
+      - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt update
+
           sudo apt install -y \
-            bc flex zstd ccache curl git zip unzip rsync \
-            libelf-dev libarchive-tools libc++-dev libc++abi-dev \
-            bison build-essential libssl-dev libtinfo6
+          bc \
+          bison \
+          flex \
+          git \
+          curl \
+          zip \
+          unzip \
+          rsync \
+          ccache \
+          zstd \
+          build-essential \
+          libssl-dev \
+          libelf-dev \
+          libarchive-tools \
+          libc++-dev \
+          libc++abi-dev \
+          libtinfo6 \
+          gcc-aarch64-linux-gnu \
+          gcc-arm-linux-gnueabi
 
       - name: Setup ccache
         run: |
-          echo "CCACHE_DIR=${HOME}/.ccache" >> $GITHUB_ENV
           ccache -M 20G
+          ccache -s
 
       - name: Clone AOSP Clang 17
         run: |
-          git clone --depth=1 https://gitlab.com/HELLINFIX/aosp-clang-17.0.0.git clang
+          git clone --depth=1 \
+          https://gitlab.com/HELLINFIX/aosp-clang-17.0.0.git clang
+
           cd clang
-          bash <(curl -s https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman) --patch=glibc
+
+          bash <(curl -s \
+          https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman) \
+          --patch=glibc
+
           cd ..
 
-      # ===== KernelSU-Next =====
-      - name: Setup KernelSU-Next v1.1.1
+      - name: Setup KernelSU-Next
         run: |
           curl -LSs \
-            https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
-            -o ksu_setup.sh
+          https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+          -o ksu_setup.sh
+
           chmod +x ksu_setup.sh
+
           bash ksu_setup.sh v1.1.1
 
-      - name: Build kernel
+      - name: Clean Source
         run: |
-          export PATH="${PWD}/clang/bin:${PATH}"
-          
-          # Defconfig জেনারেট করা
-          make O=out spaced_defconfig
-          
-          # MTK Clang কমপ্লায়েন্স সহ কম্পাইল
-          make -j$(nproc) O=out \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CONFIG_NO_ERROR_ON_MISMATCH=y \
-            2>&1 | tee build.log
+          make mrproper
 
-      - name: Upload build log
+      - name: Configure Kernel
+        run: |
+          export PATH="${PWD}/clang/bin:$PATH"
+
+          make O=out \
+          ARCH=arm64 \
+          spaced_defconfig
+
+      - name: Build Kernel
+        run: |
+          export PATH="${PWD}/clang/bin:$PATH"
+
+          make -j$(nproc) \
+          O=out \
+          ARCH=arm64 \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          CONFIG_NO_ERROR_ON_MISMATCH=y \
+          2>&1 | tee build.log
+
+      - name: Upload Build Log
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
+          name: Build-Log
           path: build.log
 
-      - name: Package with AnyKernel3
+      - name: Package Kernel
+        if: success()
         run: |
-          # MT6781 এর জন্য সঠিক ইমেজ ফরম্যাট ডিটেকশন লজিক
-          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
-            IMAGE="out/arch/arm64/boot/Image.gz-dtb"
-          elif [ -f "out/arch/arm64/boot/Image.gz" ]; then
-            IMAGE="out/arch/arm64/boot/Image.gz"
-          elif [ -f "out/arch/arm64/boot/Image" ]; then
-            IMAGE="out/arch/arm64/boot/Image"
+
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            IMAGE=out/arch/arm64/boot/Image.gz-dtb
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            IMAGE=out/arch/arm64/boot/Image.gz
+          elif [ -f out/arch/arm64/boot/Image ]; then
+            IMAGE=out/arch/arm64/boot/Image
           else
-            echo "Error: No usable Kernel Image found!"
+            echo "Kernel Image Not Found!"
             exit 1
           fi
 
-          git clone --depth=1 https://github.com/HELLINFIX/AnyKernel3 AnyKernel
+          git clone --depth=1 \
+          https://github.com/HELLINFIX/AnyKernel3.git \
+          AnyKernel
+
           cp "$IMAGE" AnyKernel/
-          
-          # যদি dtbo এবং dtb আলাদা জেনারেট হয়, সেগুলোও কপি করবে
-          [ -f "out/arch/arm64/boot/dtbo.img" ] && cp "out/arch/arm64/boot/dtbo.img" AnyKernel/
-          [ -f "out/arch/arm64/boot/dtb" ] && cp "out/arch/arm64/boot/dtb" AnyKernel/
+
+          if [ -f out/arch/arm64/boot/dtb ]; then
+            cp out/arch/arm64/boot/dtb AnyKernel/
+          fi
+
+          if [ -f out/arch/arm64/boot/dtbo.img ]; then
+            cp out/arch/arm64/boot/dtbo.img AnyKernel/
+          fi
 
           cd AnyKernel
-          ZIP_NAME="APEX-Nebula-spaced-$(date +'%Y%m%d-%H%M').zip"
+
+          ZIP_NAME="APEX-Nebula-SPACED-$(date +%Y%m%d-%H%M).zip"
+
           zip -r9 "$ZIP_NAME" *
+
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: Upload kernel zip
+      - name: Upload Kernel Zip
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: APEX-Kernel-SPACED
+          name: APEX-SPACED-Kernel
           path: AnyKernel/*.zip
